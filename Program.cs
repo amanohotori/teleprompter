@@ -9,14 +9,28 @@ namespace TeleprompterConsole
     {
         static void Main(string[] args)
         {
-            ShowTeleprompter().Wait();
+            RunTeleprompter().Wait();
             /*
             ※詳しい引用 https://docs.microsoft.com/ja-jp/dotnet/csharp/tutorials/console-teleprompter
             "ここで、Main では、コードは同期的に待機します。 可能なときは同期的に待機しないで、await 演算子を使用します。 しかし、コンソール アプリケーションの Main メソッドでは、await 演算子を使うことはできません。 それでは、すべてのタスクが完了する前にアプリケーションが終了することになります。"
             ※追記・だけど C# の現バージョンでは async Main メソッドが使える（Mainメソッドを非同期にできる）らしい。どういう状況で使うのか、いまはよくわからない。
             */
         }
-        private static async Task ShowTeleprompter()
+        private static async Task RunTeleprompter()
+        // config.cs に従って、ShowTeleprompter メソッドと GetInput メソッドを開始して、最初のタスクが終了する時に終了させる、全体の制御のためのメソッド。
+        {
+            var config = new TelePrompterConfig();
+            // config.cs の TelePrompterConfigを config に代入。
+            var displayTask = ShowTeleprompter(config);
+            // config を引数に ShowTeleprompter を実行して、戻り値を displayTask に代入。
+
+            var speedTask = GetInput(config);
+            // config を引数に GetInput を実行して、戻り値を speetTask に代入。
+            await Task.WhenAny(displayTask, speedTask);
+            // WhenAny(Task[]) の呼び出し。WhenAnyはリスト内の任意のタスクが完了したらすぐに終了する。
+        }
+
+        private static async Task ShowTeleprompter(TelePrompterConfig config)
         {
             var words = ReadFrom("sampleQuotes.txt");
             // ファイル名を引数にReadFromメソッド（Mainメソッドの次に書いてある）の戻り値をwordsに返す。
@@ -28,8 +42,8 @@ namespace TeleprompterConsole
                 if (!string.IsNullOrWhiteSpace(word))
                 // wordがnullかスペースだったら
                 {
-                    await Task.Delay(200);
-                    // 200ms待ってから続ける
+                    await Task.Delay(config.DelayInMilliseconds);
+                    // config.DelayInMillisecondsの値の数ms待ってから続ける
 
                     /*
                     ※重要なメモ※ "await" 演算子は "return" のようにメソッドの戻り値として Task が呼び出し元に返される。 "Task.Delay(200)" （200ms止まれ） Task が、この "ShowTeleprompter" メソッドの戻り値となる。
@@ -38,7 +52,10 @@ namespace TeleprompterConsole
                     */
                 }
             }
+            config.SetDone();
+            // foreach が最後まで終わったら Done フラグに true を設定
         }
+
         static IEnumerable<string> ReadFrom(string file)
         // IEnumerable<string> は指定された型（ここではstring）に対する反復処理をサポートする列挙子
         // 以下に書くReadFromメソッドは、引数にfile名のstringを受け取り、fileの内容を読みながらスペースで単語に区切ったり、他色々処理して返していくメソッド
@@ -80,9 +97,8 @@ namespace TeleprompterConsole
                 }
             }
         }
-        private static async Task GetInput()
+        private static async Task GetInput(TelePrompterConfig config)
         {
-            var delay = 200;
             Action work = () =>
             /*
             ※ わかりづらいので詳しくメモする。
@@ -101,20 +117,24 @@ namespace TeleprompterConsole
             {
                 do {
                     var key = Console.ReadKey(true);
+                    // コンソールのキー入力を読み取り key に代入。 true オプションは入力をコンソールに表示しない。
                     if (key.KeyChar == '>')
                     {
-                        delay -= 10;
+                        config.UpdateDelay(-10);
+                        // 10ms だけ Delay が短くなる。（早くなる）
                     }
                     else if (key.KeyChar == '<')
                     {
-                        delay += 10;
+                        config.UpdateDelay(10);
+                        // 10ms だけ Delay が長くなる。（遅くなる）
                     }
                     else if (key.KeyChar == 'X' || key.KeyChar == 'x')
                     {
-                        break;
+                        config.SetDone();
+                        // Done フラグを true に
                     }
-                } while (true);
-                // 条件式が true なので、doの繰り返しは終わらない
+                } while (!config.Done);
+                // Done フラグが false であれば繰り返し。 true であれば抜ける。
             };
             await Task.Run(work);
             // カプセル化されたデリゲートメソッドworkをawait（非同期）で実行
